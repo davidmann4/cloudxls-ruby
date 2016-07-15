@@ -10,9 +10,9 @@ Or in your Gemfile
 
 ## Set-up API-Keys
 
-Get your API key by registering on https://www.cloudxls.com.
+Register on https://www.cloudxls.com to get an API key.
 
-Configure using the ENV variable `CLOUDXLS_API_KEY` or manually.
+Either set the ENV variable `CLOUDXLS_API_KEY` or manually using `Cloudxls.api_key#=`
 
 ```ruby
 Cloudxls.api_key = "YOUR-API-KEY"
@@ -20,8 +20,8 @@ Cloudxls.api_key = "YOUR-API-KEY"
 
 ### Sandbox
 
-If you add a sandbox API key (they start with 'test_') we will configure the client to send requests
-to the sandbox API.
+If you use a sandbox API key (starting with 'test_') the client sends requests
+to the sandbox test API.
 
 ## Read-API
 
@@ -45,11 +45,15 @@ Output
 ]
 ```
 
-```ruby
-# Save to a file
-Cloudxls.read(File.new("/path/to/my-excel.xls")).save_as("output.json")
+Save json to a file
 
-# Or access the response_stream directly
+```ruby
+Cloudxls.read(File.new("/path/to/my-excel.xls")).save_as("output.json")
+```
+
+Or access the response_stream directly
+
+```ruby
 io = File.new("output.json", "w")
 Cloudxls.read(File.new("/path/to/my-excel.xls")).each do |chunk|
   io.write chunk
@@ -66,27 +70,30 @@ csv_string = "hello,world\nfoo,bar"
 
 Cloudxls.write(csv_string)
   .save_as("/tmp/hello-world.xls")
+```
 
+With options:
 
-# With options:
-
+```ruby
 req = Cloudxls.write(csv_string, {
   offset: "B2",
   sheet_name: "Data"
 })
 req.save_as("/tmp/hello-world.xls")
+```
 
+Multiple sheets:
 
-# Multiple sheets
-
+```ruby
 Cloudxls.write(csv_string)
   .add_data("more,data")
   .add_data("more,data", sheet_name: "foobar")
   .save_as("/tmp/hello-world.xls")
+```
 
+Append data to a target file (xls or xlsx)
 
-# Append data to a target file (xls or xlsx)
-
+```ruby
 Cloudxls.write(csv_string)
   .add_data("more,data")
   .add_data("more,data", sheet_name: "foobar")
