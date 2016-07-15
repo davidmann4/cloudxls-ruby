@@ -58,7 +58,8 @@ data = Cloudxls.read(file_url: "http://example.org/data.xls").to_h
 Save json to a file
 
 ```ruby
-Cloudxls.read(File.new("/path/to/my-excel.xls")).save_as("output.json")
+Cloudxls.read(file: File.new("my-excel.xls"))
+  .save_as("output.json")
 ```
 
 Or access the response_stream directly
