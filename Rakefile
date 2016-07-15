@@ -1,9 +1,8 @@
 task :default => [:test]
 
-task :test do
-  ret = true
-  Dir["test/**/*.rb"].each do |f|
-    ret = ret && ruby(f, '')
-  end
-  exit(ret)
+require 'rake/testtask'
+
+Rake::TestTask.new do |t|
+  t.libs << 'test'
+  t.pattern = "test/*_test.rb"
 end

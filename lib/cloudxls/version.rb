@@ -1,3 +1,3 @@
-class CloudXLS
-  VERSION = '0.7.0'
+class Cloudxls
+  VERSION = '2.0.0-beta'
 end

@@ -1,150 +1,175 @@
-require 'cgi'
-require 'set'
 require 'openssl'
 require 'json'
-require 'date'
-require 'rest_client'
-require 'json'
+require 'net/http'
+require 'net/http/post/multipart'
 
-require_relative 'cloudxls/version'
 
-class CloudXLS
-  @https = true
-  @api_base = 'api.cloudxls.com'.freeze
-  @api_key  = ENV["CLOUDXLS_API_KEY"]
+class Cloudxls
+  class ApiError < Exception
+  end
+
+  @api_key      = ENV.fetch("CLOUDXLS_API_KEY", nil)
+  @api_base     = ENV.fetch("CLOUDXLS_API_BASE", "api.cloudxls.com")
+  @sandbox_base = "sandbox.cloudxls.com"
+  @api_version  = "v2".freeze
 
   class << self
-    attr_accessor :api_key, :api_base, :api_version, :https
-  end
+    attr_accessor :api_key,
+                  :api_version,
+                  :api_base,
+                  :sandbox_base,
+                  :port
 
-  def self.api_url(path = '')
-    # @api_base + url
-    "http#{@https ? 's' : ''}://#{@api_key}:@#{@api_base}/v1/#{path}"
-  end
+    def client_options
+      {
+        api_key: self.api_key,
+        api_version: self.api_version,
+        api_base: self.api_base,
+        port: 443
+      }
+    end
 
+    def write(csv, params = {}, client_options = nil)
+      Write.new(client_options).add_data(csv, params)
+    end
 
-  class CloudXLSResponse
-    attr_reader :url, :uuid, :response
-
-    def initialize(response)
-      data = CloudXLS.parse_response(response)
-      @response = response
-      @url  = data['url']
-      @uuid = data['uuid']
+    def read(file, params = {}, client_options = nil)
+      Read.new(client_options).add_data(file, params)
     end
   end
 
+  module BaseRequest
+    def initialize(client_options = nil)
+      @post_data = []
 
-  def self.async(params = {})
-    if params["mode"]
-      params["mode"] = "async"
-    else
-      params[:mode] = "async"
-    end
-    CloudXLSResponse.new(convert(params))
-  end
-
-
-  def self.inline(params = {})
-    if params["mode"]
-      params["mode"] = "inline"
-    else
-      params[:mode] = "inline"
-    end
-    convert(params)
-  end
-
-
-  # @example
-  #     CloudXLS.convert :data => {:file => File.new('/path/to/data.csv', 'r')}
-  #     CloudXLS.convert :data => {:file => File.new("foo,bar\nlorem,ipsum")  }
-  #     CloudXLS.convert :data => {:url => "https://example.com/data.csv"}
-  #     CloudXLS.convert :data => {:url => "https://username:password@example.com/data.csv"}
-  #
-  def self.convert(params = {})
-    check_api_key!
-
-    headers = {}
-
-    response = execute_request do
-      RestClient.post(api_url("convert"), params, headers)
+      @finished  = false
+      @client_options = client_options || Cloudxls.client_options
     end
 
-    response
-  end
-
-  # @deprecated
-  def self.xpipe(params = {})
-    convert(params)
-  end
-
-  def self.execute_request
-    begin
-      return yield
-    rescue SocketError => e
-      handle_restclient_error(e)
-    rescue NoMethodError => e
-      # Work around RestClient bug
-      if e.message =~ /\WRequestFailed\W/
-        e = APIConnectionError.new('Unexpected HTTP response code')
-        handle_restclient_error(e)
-      else
-        raise
+    def api_key
+      key = client_options[:api_key]
+      if key.nil?
+        raise "api_key is nil. Configure using CLOUDXLS_API_KEY ENV variable or Cloudxls.api_key = ..."
       end
-    rescue RestClient::ExceptionWithResponse => e
-      if rcode = e.http_code and rbody = e.http_body
-        # TODO
-        # handle_api_error(rcode, rbody)
-        handle_restclient_error(e)
+      key
+    end
+
+    def test_key?
+      api_key.to_s.downcase.start_with?("test")
+    end
+
+    def api_base
+      if test_key?
+        Cloudxls.sandbox_base
       else
-        handle_restclient_error(e)
+        client_options[:api_base]
       end
-    rescue RestClient::Exception, Errno::ECONNREFUSED => e
-      handle_restclient_error(e)
+    end
+
+    def start(&block)
+      Net::HTTP.start(api_base, client_options[:port], use_ssl: true, &block)
+    end
+
+    def path_to(path)
+      "/#{client_options[:api_version]}/#{path}"
+    end
+
+    def write_to(io)
+      each do |chunk|
+        io.write chunk
+      end
+      io
+    ensure
+      io.close
+    end
+
+    def save_as(path)
+      write_to File.open(path, 'wb')
+    end
+
+    def each(&block)
+      raise "#{self.class.name} already executed" if @finished
+
+      start do |http|
+        request = Net::HTTP::Post::Multipart.new(self.path, @post_data)
+        request.basic_auth api_key, ""
+        request['User-Agent'] = "cloudxls-ruby #{Cloudxls::VERSION}"
+
+        http.request(request) do |response|
+          if Net::HTTPSuccess === response
+            response.read_body(&block)
+          else
+            raise ApiError.new("#{response.code} #{response.class.name.to_s}: #{response.body}")
+          end
+        end
+      end
+      @finished = true
+      self
     end
   end
 
-  def self.parse_response(response)
-    json = JSON.parse(response.body)
-  rescue => e
-    raise general_api_error(response.code, response.body)
-  end
+  class Read
+    include BaseRequest
 
-  def self.general_api_error(rcode, rbody)
-    StandardError.new("Invalid response object from API: #{rbody.inspect} " +
-                 "(HTTP response code was #{rcode})" ) #, rcode, rbody)
-  end
+    # post_data is an array of key,value arrays. Reason:
+    # - A key can appear multiple times (for multiple sheets)
+    # - Parameters need to be in the right order: template - config - data
+    #
+    # Example: [["separator", ","], ["csv", "hello,world"]]
+    attr_reader :post_data
+    attr_reader :client_options
 
-
-
-private
-  def self.handle_restclient_error(e)
-    case e
-    when RestClient::ServerBrokeConnection, RestClient::RequestTimeout
-      message = "Could not connect to CloudXLS (#{@api_base}). " +
-        "Please check your internet connection and try again. "
-    when RestClient::SSLCertificateNotVerified
-      message = "Could not verify CloudXLS's SSL certificate. " +
-        "Please make sure that your network is not intercepting certificates. "
-    when SocketError
-      message = "Unexpected error communicating when trying to connect to CloudXLS. " +
-        "You may be seeing this message because your DNS is not working. " +
-        "To check, try running 'host cloudxls.com' from the command line."
-    else
-      message = "Unexpected error communicating with CloudXLS. " +
-        "If this problem persists, let us know at support@cloudxls.com."
+    def add_data(data, params)
+      @post_data += params.map {|k,v| [k.to_s, v] }
+      @post_data << ["file", UploadIO.new(data, "text/csv", "data.csv")] if data
+      self
     end
 
-    raise StandardError.new(message + "\n\n(Network error: #{e.message})")
-  end
-
-  def self.check_api_key!
-    unless api_key ||= @api_key
-      raise StandardError.new('No API key provided. Set your API key using "CloudXLS.api_key = <API-KEY>". ')
+    def response_body
+      # TODO: optimize
+      str = ""
+      each do |chunk|
+        str << chunk
+      end
+      str
     end
 
-    if api_key =~ /\s/
-      raise StandardError.new('Your API key is invalid, as it contains whitespace.')
+    def to_h
+      JSON.load(response_body)
+    end
+
+  protected
+    def path
+      path_to("read/basic.json")
+    end
+  end
+
+  class Write
+    include BaseRequest
+    # post_data is an array of key,value arrays. Reason:
+    # - A key can appear multiple times (for multiple sheets)
+    # - Parameters need to be in the right order: template - config - data
+    #
+    # Example: [["separator", ","], ["csv", "hello,world"]]
+    attr_reader :post_data
+    attr_reader :client_options
+
+    def add_data(data, params)
+      @post_data += params.map {|k,v| [k.to_s, v] }
+      # csv can be nil, if csv_url was given.
+      @post_data << ["csv", data] if data
+      self
+    end
+
+    def add_target(target_file)
+      @post_data = [["template", target_file]] + @post_data
+      self
+    end
+
+  protected
+
+    def path
+      path_to("write")
     end
   end
 
