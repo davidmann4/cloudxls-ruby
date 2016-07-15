@@ -29,12 +29,12 @@ class Cloudxls
       }
     end
 
-    def write(csv, params = {}, client_options = nil)
-      Write.new(client_options).add_data(csv, params)
+    def write(params = nil, client_options = nil)
+      Write.new(client_options).add_data(params)
     end
 
-    def read(file, params = {}, client_options = nil)
-      Read.new(client_options).add_data(file, params)
+    def read(params = nil, client_options = nil)
+      Read.new(client_options).add_data(params)
     end
   end
 
@@ -119,9 +119,16 @@ class Cloudxls
     attr_reader :post_data
     attr_reader :client_options
 
-    def add_data(data, params)
-      @post_data += params.map {|k,v| [k.to_s, v] }
-      @post_data << ["file", UploadIO.new(data, "text/csv", "data.csv")] if data
+    DATA_PARAMETERS = %w[excel file]
+
+    def add_data(params)
+      params.map do |key,value|
+        key = key.to_s
+        if DATA_PARAMETERS.include?(key)
+          value = UploadIO.new(value, "text/csv", "data.csv")
+        end
+        @post_data << [key, value]
+      end
       self
     end
 
@@ -154,14 +161,23 @@ class Cloudxls
     attr_reader :post_data
     attr_reader :client_options
 
-    def add_data(data, params)
-      @post_data += params.map {|k,v| [k.to_s, v] }
-      # csv can be nil, if csv_url was given.
-      @post_data << ["csv", data] if data
+    DATA_PARAMETERS = %w[data data_url csv csv_url json json_url]
+
+    def add_data(params = nil)
+      data_params = []
+      params.each do |key, value|
+        key = key.to_s
+        if DATA_PARAMETERS.include?(key)
+          data_params << [key, value]
+        else
+          @post_data << [key, value]
+        end
+      end
+      @post_data += data_params
       self
     end
 
-    def add_target(target_file)
+    def append_to(target_file)
       @post_data = [["template", target_file]] + @post_data
       self
     end
