@@ -83,6 +83,14 @@ Cloudxls.write(csv: csv_string)
   .save_as("/tmp/hello-world.xls")
 ```
 
+Write xlsx:
+
+```ruby
+Cloudxls.write(csv: csv_string)
+  .as_xlsx
+  .save_as("/tmp/hello-world.xlsx")
+```
+
 With options:
 
 ```ruby
@@ -107,7 +115,7 @@ Append data to a excel file (xls or xlsx)
 
 ```ruby
 Cloudxls.write(csv: csv_string)
-  .append_to(File.new("/path/to/my-file.xls"))
+  .target_file(File.new("/path/to/my-file.xls"))
   .save_as("/tmp/hello-world.xls")
 ```
 

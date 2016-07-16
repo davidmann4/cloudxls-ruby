@@ -146,8 +146,9 @@ class Cloudxls
     end
 
   protected
+
     def path
-      path_to("read/basic.json")
+      path_to("read.json")
     end
   end
 
@@ -160,6 +161,8 @@ class Cloudxls
     # Example: [["separator", ","], ["csv", "hello,world"]]
     attr_reader :post_data
     attr_reader :client_options
+
+    attr_accessor :file_format
 
     DATA_PARAMETERS = %w[data data_url csv csv_url json json_url]
 
@@ -177,15 +180,29 @@ class Cloudxls
       self
     end
 
+    def as_xls
+      file_format = "xls"
+      self
+    end
+
+    def as_xlsx
+      file_format = "xlsx"
+      self
+    end
+
     def append_to(target_file)
-      @post_data = [["template", target_file]] + @post_data
+      @post_data = [["target_file", target_file]] + @post_data
       self
     end
 
   protected
 
     def path
-      path_to("write")
+      if file_format
+        path_to("write.#{file_format}")
+      else
+        path_to("write")
+      end
     end
   end
 
