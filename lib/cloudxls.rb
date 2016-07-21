@@ -8,8 +8,6 @@ class Cloudxls
   class ApiError < Exception
   end
 
-  @api_key      = ENV.fetch("CLOUDXLS_API_KEY", nil)
-  @api_base     = ENV.fetch("CLOUDXLS_API_BASE", "api.cloudxls.com")
   @sandbox_base = "sandbox.cloudxls.com"
   @api_version  = "v2".freeze
 
@@ -22,9 +20,9 @@ class Cloudxls
 
     def client_options
       {
-        api_key: self.api_key,
+        api_key: self.api_key || ENV.fetch("CLOUDXLS_API_KEY", nil),
         api_version: self.api_version,
-        api_base: self.api_base,
+        api_base: self.api_base || ENV.fetch("CLOUDXLS_API_BASE", "api.cloudxls.com"),
         port: 443
       }
     end
@@ -35,7 +33,7 @@ class Cloudxls
     # @return [WriteRequest] write request object
     #
     def write(params = nil)
-      WriteRequest.new(client_options).add_data(params)
+      WriteRequest.new(self.client_options).add_data(params)
     end
 
     # Initializes a Read request
@@ -44,14 +42,13 @@ class Cloudxls
     # @return [WriteRequest] write request object
     #
     def read(params = nil)
-      ReadRequest.new(client_options).add_data(params)
+      ReadRequest.new(self.client_options).add_data(params)
     end
   end
 
   module BaseRequest
     def initialize(client_options = nil)
       @post_data = []
-
       @finished  = false
       @client_options = client_options || Cloudxls.client_options
     end
@@ -90,10 +87,54 @@ class Cloudxls
       "/#{client_options[:api_version]}/#{path}"
     end
 
-    # Alias for #each
+
+    # Starts request and yields response to block
     #
-    def data
-      each
+    # @params [String] path
+    #
+    def each(&block)
+      raise "#{self.class.name} already executed" if @finished
+
+      start do |http|
+        request = Net::HTTP::Post::Multipart.new(self.path, @post_data)
+        request.basic_auth api_key, ""
+        request['User-Agent'] = "cloudxls-ruby #{VERSION}"
+
+        if block_given?
+          http.request(request) do |response|
+            if Net::HTTPSuccess === response
+              response.read_body(&block)
+            else
+              raise ApiError.new("#{response.code} #{response.class.name.to_s}: #{response.body}")
+            end
+          end
+        else
+          http.request(request)
+        end
+      end
+      @finished = true
+      self
+    end
+  end
+
+  module BaseResponse
+    # Response as string
+    #
+    # @return [String]
+    #
+    def response_body
+      # TODO: optimize
+      str = ""
+      each do |chunk|
+        str << chunk
+      end
+      str
+    end
+
+    # Response body. Required to make Rails send_data work out of the box.
+    #
+    def to_s
+      response_body
     end
 
     # Writes to IO object
@@ -119,33 +160,26 @@ class Cloudxls
       write_to File.open(path, 'wb')
     end
 
-    # Starts request and yields response to block
-    #
-    # @params [String] path
-    #
     def each(&block)
-      raise "#{self.class.name} already executed" if @finished
-
-      start do |http|
-        request = Net::HTTP::Post::Multipart.new(self.path, @post_data)
-        request.basic_auth api_key, ""
-        request['User-Agent'] = "cloudxls-ruby #{Cloudxls::VERSION}"
-
-        if block_given?
-          http.request(request) do |response|
-            if Net::HTTPSuccess === response
-              response.read_body(&block)
-            else
-              raise ApiError.new("#{response.code} #{response.class.name.to_s}: #{response.body}")
-            end
-          end
-        else
-          http.request(request)
-        end
-      end
-      @finished = true
-      self
+      @request.each(&block)
     end
+  end
+
+  class ReadResponse
+    include BaseResponse
+
+    def initialize(req)
+      @request = req
+    end
+
+    # Response as Hash (used with json)
+    #
+    # @return [String]
+    #
+    def to_h
+      JSON.load(response_body)
+    end
+
   end
 
   class ReadRequest
@@ -173,49 +207,36 @@ class Cloudxls
       self
     end
 
-    # Response as string
-    #
-    # @return [String]
-    #
-    def response_body
-      # TODO: optimize
-      str = ""
-      each do |chunk|
-        str << chunk
-      end
-      str
-    end
-
     # Set request to JSON
     #
-    # @returns [require] returns self
+    # @returns [ReadResponse] read response
     #
     def as_json
       self.file_format = "json"
-      self
+      ReadResponse.new(self)
     end
 
     # Set request to CSV
     #
-    # @returns [WriteRequest] returns self
+    # @returns [ReadResponse] returns self
     #
     def as_csv
       self.file_format = "csv"
-      self
-    end
-
-    # Response as Hash (used with json)
-    #
-    # @return [String]
-    #
-    def to_h
-      JSON.load(response_body)
+      ReadResponse.new(self)
     end
 
   protected
 
     def path
       path_to("read.#{file_format || "json"}")
+    end
+  end
+
+  class WriteResponse
+    include BaseResponse
+
+    def initialize(req)
+      @request = req
     end
   end
 
@@ -257,20 +278,20 @@ class Cloudxls
 
     # Set request to XLS
     #
-    # @returns [WriteRequest] returns self
+    # @returns [WriteResponse] response object without starting the request
     #
     def as_xls
       self.file_format = "xls"
-      self
+      WriteResponse.new(self)
     end
 
     # Set request to XLSX
     #
-    # @returns [WriteRequest] returns self
+    # @returns [WriteResponse] response object without starting the request
     #
     def as_xlsx
       self.file_format = "xlsx"
-      self
+      WriteResponse.new(self)
     end
 
     # Sets request to XLSX

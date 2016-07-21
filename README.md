@@ -52,7 +52,7 @@ Output
 From a remote url
 
 ```ruby
-data = Cloudxls.read(file_url: "http://example.org/data.xls").to_h
+data = Cloudxls.read(file_url: "http://example.org/data.xls").as_json.to_h
 ```
 
 Save json to a file
@@ -66,7 +66,7 @@ Or access the response_stream directly
 
 ```ruby
 io = File.new("output.json", "w")
-Cloudxls.read(file: File.new("/path/to/my-excel.xls")).each do |chunk|
+Cloudxls.read(file: File.new("/path/to/my-excel.xls")).as_csv.each do |chunk|
   io.write chunk
 end
 io.close
@@ -80,7 +80,9 @@ Write a xls file with a single sheet.
 csv_string = "hello,world\nfoo,bar"
 
 Cloudxls.write(csv: csv_string)
+  .as_xls
   .save_as("/tmp/hello-world.xls")
+
 ```
 
 Write xlsx:
@@ -99,7 +101,8 @@ req = Cloudxls.write(
   offset: "B2",
   sheet_name: "Data"
 )
-req.save_as("/tmp/hello-world.xls")
+xls_response = req.as_xls
+xls_response.save_as("/tmp/hello-world.xls")
 ```
 
 Multiple sheets:
@@ -108,6 +111,7 @@ Multiple sheets:
 Cloudxls.write(csv: csv_string)
   .add_data(csv: "more,data")
   .add_data(csv: "more,data", sheet_name: "foobar")
+  .as_xls
   .save_as("/tmp/hello-world.xls")
 ```
 
@@ -116,6 +120,7 @@ Append data to a excel file (xls or xlsx)
 ```ruby
 Cloudxls.write(csv: csv_string)
   .target_file(File.new("/path/to/my-file.xls"))
+  .as_xls
   .save_as("/tmp/hello-world.xls")
 ```
 
@@ -126,9 +131,16 @@ Assign the result of a `#write` or `#read` call to the `response_body`.
 
 ```ruby
 def index
-  headers["Content-Type"] = "application/vnd.ms-excel"
-  headers["Content-disposition"] = "attachment; filename=users.xls"
+  csv_data = "hello,world"
 
-  self.response_body = Cloudxls.write(csv: User.all.to_csv)
+  headers["Content-Type"] = Mime::Type.lookup_by_extension(params[:format])
+  headers["Content-disposition"] = "attachment; filename=data.#{params[:format]}"
+
+  respond_to do |format|
+
+    format.csv  { self.response_body = csv_data }
+    format.xls  { self.response_body = Cloudxls.write(csv: csv_data).as_xls }
+    format.xlsx { self.response_body = Cloudxls.write(csv: csv_data).as_xlsx }
+  end
 end
 ```
