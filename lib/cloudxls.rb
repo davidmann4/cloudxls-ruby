@@ -29,12 +29,22 @@ class Cloudxls
       }
     end
 
-    def write(params = nil, client_options = nil)
-      Write.new(client_options).add_data(params)
+    # Initializes a Write request
+    #
+    # @param [Hash] params request parameters as
+    # @return [WriteRequest] write request object
+    #
+    def write(params = nil)
+      WriteRequest.new(client_options).add_data(params)
     end
 
-    def read(params = nil, client_options = nil)
-      Read.new(client_options).add_data(params)
+    # Initializes a Read request
+    #
+    # @param [Hash] params request parameters as
+    # @return [WriteRequest] write request object
+    #
+    def read(params = nil)
+      ReadRequest.new(client_options).add_data(params)
     end
   end
 
@@ -54,6 +64,10 @@ class Cloudxls
       key
     end
 
+    # Is Api Key for testing/sandbox only?
+    #
+    # @return [Boolean] write request object
+    #
     def test_key?
       api_key.to_s.downcase.start_with?("test")
     end
@@ -66,6 +80,8 @@ class Cloudxls
       end
     end
 
+    # Internal. Starts the request.
+    #
     def start(&block)
       Net::HTTP.start(api_base, client_options[:port], use_ssl: true, &block)
     end
@@ -74,6 +90,17 @@ class Cloudxls
       "/#{client_options[:api_version]}/#{path}"
     end
 
+    # Alias for #each
+    #
+    def data
+      each
+    end
+
+    # Writes to IO object
+    #
+    # @params [IO, #write] io
+    # @returns [IO]
+    #
     def write_to(io)
       each do |chunk|
         io.write chunk
@@ -83,10 +110,19 @@ class Cloudxls
       io.close
     end
 
+    # Write response to file
+    #
+    # @params [String] path
+    # @returns [File]
+    #
     def save_as(path)
       write_to File.open(path, 'wb')
     end
 
+    # Starts request and yields response to block
+    #
+    # @params [String] path
+    #
     def each(&block)
       raise "#{self.class.name} already executed" if @finished
 
@@ -95,12 +131,16 @@ class Cloudxls
         request.basic_auth api_key, ""
         request['User-Agent'] = "cloudxls-ruby #{Cloudxls::VERSION}"
 
-        http.request(request) do |response|
-          if Net::HTTPSuccess === response
-            response.read_body(&block)
-          else
-            raise ApiError.new("#{response.code} #{response.class.name.to_s}: #{response.body}")
+        if block_given?
+          http.request(request) do |response|
+            if Net::HTTPSuccess === response
+              response.read_body(&block)
+            else
+              raise ApiError.new("#{response.code} #{response.class.name.to_s}: #{response.body}")
+            end
           end
+        else
+          http.request(request)
         end
       end
       @finished = true
@@ -108,7 +148,7 @@ class Cloudxls
     end
   end
 
-  class Read
+  class ReadRequest
     include BaseRequest
 
     # post_data is an array of key,value arrays. Reason:
@@ -118,6 +158,7 @@ class Cloudxls
     # Example: [["separator", ","], ["csv", "hello,world"]]
     attr_reader :post_data
     attr_reader :client_options
+    attr_accessor :file_format
 
     DATA_PARAMETERS = %w[excel file]
 
@@ -132,6 +173,10 @@ class Cloudxls
       self
     end
 
+    # Response as string
+    #
+    # @return [String]
+    #
     def response_body
       # TODO: optimize
       str = ""
@@ -141,6 +186,28 @@ class Cloudxls
       str
     end
 
+    # Set request to JSON
+    #
+    # @returns [require] returns self
+    #
+    def as_json
+      self.file_format = "json"
+      self
+    end
+
+    # Set request to CSV
+    #
+    # @returns [WriteRequest] returns self
+    #
+    def as_csv
+      self.file_format = "csv"
+      self
+    end
+
+    # Response as Hash (used with json)
+    #
+    # @return [String]
+    #
     def to_h
       JSON.load(response_body)
     end
@@ -148,11 +215,11 @@ class Cloudxls
   protected
 
     def path
-      path_to("read.json")
+      path_to("read.#{file_format || "json"}")
     end
   end
 
-  class Write
+  class WriteRequest
     include BaseRequest
     # post_data is an array of key,value arrays. Reason:
     # - A key can appear multiple times (for multiple sheets)
@@ -166,11 +233,19 @@ class Cloudxls
 
     DATA_PARAMETERS = %w[data data_url csv csv_url json json_url]
 
+    # Add another configuration block, consisting of sheet configuration and data element.
+    #
+    # @params [Hash] params
+    # @returns [WriteRequest] returns self
+    #
     def add_data(params = nil)
       data_params = []
       params.each do |key, value|
         key = key.to_s
         if DATA_PARAMETERS.include?(key)
+          if value.is_a?(File)
+            value = UploadIO.new(value, "text/csv", "data")
+          end
           data_params << [key, value]
         else
           @post_data << [key, value]
@@ -180,18 +255,31 @@ class Cloudxls
       self
     end
 
+    # Set request to XLS
+    #
+    # @returns [WriteRequest] returns self
+    #
     def as_xls
-      file_format = "xls"
+      self.file_format = "xls"
       self
     end
 
+    # Set request to XLSX
+    #
+    # @returns [WriteRequest] returns self
+    #
     def as_xlsx
-      file_format = "xlsx"
+      self.file_format = "xlsx"
       self
     end
 
+    # Sets request to XLSX
+    #
+    # @returns [WriteRequest] returns self
+    #
     def append_to(target_file)
-      @post_data = [["target_file", target_file]] + @post_data
+      io = UploadIO.new(target_file, "application/octet-stream", "target-file")
+      @post_data = [["target_file", io]] + @post_data
       self
     end
 
