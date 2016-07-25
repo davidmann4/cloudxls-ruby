@@ -29,10 +29,10 @@ to the sandbox test API.
 
 ## Read-API
 
-Send an xls or xlsx file using the `Cloudxls#read` method. `#to_h` will start the request and parse the json into a ruby hash.
+Send an xls or xlsx file using the `Cloudxls#read` method. `#as_json` will start the request and `#to_h` parses the json into a ruby hash.
 
 ```ruby
-data = Cloudxls.read(file: File.new("/path/to/my-excel.xls")).to_h
+data = Cloudxls.read(file: File.new("/path/to/my-excel.xls")).as_json.to_h
 ```
 
 Output
