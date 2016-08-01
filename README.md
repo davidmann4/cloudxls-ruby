@@ -8,7 +8,7 @@ Or in your Gemfile
 
 # Documentation
 
-Additional documentation: [https://docs.cloudxls.com](docs.cloudxls.com)
+Additional documentation: [https://docs.cloudxls.com](https://docs.cloudxls.com)
 
 # Quick Start Guide
 
